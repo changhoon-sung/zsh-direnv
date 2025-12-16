@@ -3,123 +3,121 @@
 #####################
 # COMMONS
 #####################
-autoload colors is-at-least
-
-#########################
-# CONSTANT
-#########################
-BOLD="bold"
-NONE="NONE"
 
 #########################
 # PLUGIN MAIN
 #########################
 
-[[ -z "$DIRENV_HOME" ]] && export DIRENV_HOME="$HOME/.direnv"
-
-ZSH_DIRENV_VERSION_FILE=${DIRENV_HOME}/version.txt
+ZSH_DIRENV_BIN_DIR="$HOME/.local/bin"
+ZSH_DIRENV_BIN_PATH="$ZSH_DIRENV_BIN_DIR/direnv"
 
 #########################
 # Functions
 #########################
 
 _zsh_direnv_log() {
-  local font=$1
-  local color=$2
-  local msg=$3
-
-  if [ "$font" = $BOLD ]
-  then
-    echo $fg_bold[$color] "[zsh-direnv-plugin] $msg" $reset_color
-  else
-    echo $fg[$color] "[zsh-direnv-plugin] $msg" $reset_color
-  fi
+  local msg=$1
+  echo "[zsh-direnv-plugin] $msg"
 }
 
 _zsh_direnv_last_version() {
-  echo $(curl -s https://api.github.com/repos/direnv/direnv/releases/latest | grep tag_name | cut -d '"' -f 4)
+  curl -s https://api.github.com/repos/direnv/direnv/releases/latest | grep tag_name | cut -d '"' -f 4
 }
 
-_zsh_direnv_download_install() {
-    local version=$1
-    local machine
-    case "$(uname -m)" in
-      x86_64)
-        machine=amd64
-        ;;
-      arm64)
-        machine=arm64
-        ;;
-      aarch64)
-        machine=arm64
-        ;;
-      i686 | i386)
-        machine=386
-        ;;
-      *)
-        _zsh_direnv_log $BOLD "red" "Machine $(uname -m) not supported by this plugin"
-        return 1
+_zsh_direnv_install_if_missing() {
+  if command -v direnv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ -x "$ZSH_DIRENV_BIN_PATH" ]]; then
+    return 0
+  fi
+
+  _zsh_direnv_log "#############################################"
+  _zsh_direnv_log "Installing direnv to ${ZSH_DIRENV_BIN_PATH}..."
+
+  if ! command -v curl >/dev/null 2>&1; then
+    _zsh_direnv_log "curl not found; cannot auto-install direnv"
+    _zsh_direnv_log "#############################################"
+    return 1
+  fi
+
+  mkdir -p "$ZSH_DIRENV_BIN_DIR" || {
+    _zsh_direnv_log "Failed to create directory: ${ZSH_DIRENV_BIN_DIR}"
+    _zsh_direnv_log "#############################################"
+    return 1
+  }
+
+  local version="$(_zsh_direnv_last_version)"
+  if [[ -z "$version" ]]; then
+    _zsh_direnv_log "Failed to detect latest direnv version"
+    _zsh_direnv_log "#############################################"
+    return 1
+  fi
+
+  local machine
+  case "$(uname -m)" in
+    x86_64)
+      machine=amd64
       ;;
-    esac
-    # if on Darwin, trim $OSTYPE to match the direnv release
-    [[ "$OSTYPE" == "darwin"* ]] && local OSTYPE=darwin
-    _zsh_direnv_log $NONE "blue" "  -> download and install direnv ${version}"
-    curl -o "${DIRENV_HOME}/direnv" -fsSL https://github.com/direnv/direnv/releases/download/${version}/direnv.${OSTYPE%-*}-${machine}
-    chmod +x "${DIRENV_HOME}/direnv"
-    echo ${version} > ${ZSH_DIRENV_VERSION_FILE}
-}
+    arm64)
+      machine=arm64
+      ;;
+    aarch64)
+      machine=arm64
+      ;;
+    i686 | i386)
+      machine=386
+      ;;
+    *)
+      _zsh_direnv_log "Machine $(uname -m) not supported by this plugin"
+      _zsh_direnv_log "#############################################"
+      return 1
+    ;;
+  esac
 
-_zsh_direnv_install() {
-  _zsh_direnv_log $NONE "blue" "#############################################"
-  _zsh_direnv_log $BOLD "blue" "Installing direnv..."
-  _zsh_direnv_log $NONE "blue" "-> creating direnv home dir : ${DIRENV_HOME}"
-  mkdir -p ${DIRENV_HOME} || _zsh_direnv_log $NONE "green" "dir already exist"
-  local last_version=$(_zsh_direnv_last_version)
-  _zsh_direnv_log $NONE "blue" "-> retrieve last version of direnv..."
-  _zsh_direnv_download_install ${last_version}
-  if [ $? -ne 0 ]
-  then
-    _zsh_direnv_log $BOLD "red" "Install KO"
-  else
-    _zsh_direnv_log $BOLD "green" "Install OK"
+  local os
+  case "$OSTYPE" in
+    darwin*) os=darwin ;;
+    linux*) os=linux ;;
+    *)
+      _zsh_direnv_log "OSTYPE ${OSTYPE} not supported by this plugin"
+      _zsh_direnv_log "#############################################"
+      return 1
+    ;;
+  esac
+
+  _zsh_direnv_log "  -> download and install direnv ${version}"
+  if ! curl -fsSL -o "$ZSH_DIRENV_BIN_PATH" "https://github.com/direnv/direnv/releases/download/${version}/direnv.${os}-${machine}"; then
+    _zsh_direnv_log "Failed to download direnv from GitHub releases"
+    _zsh_direnv_log "#############################################"
+    return 1
   fi
-  _zsh_direnv_log $NONE "blue" "#############################################"
-}
 
-update_zsh_direnv() {
-  _zsh_direnv_log $NONE "blue" "#############################################"
-  _zsh_direnv_log $BOLD "blue" "Checking new version of direnv..."
-
-  local current_version=$(cat ${ZSH_DIRENV_VERSION_FILE})
-  local last_version=$(_zsh_direnv_last_version)
-
-  if is-at-least ${last_version#v*} ${current_version#v*}
-  then
-    _zsh_direnv_log $BOLD "green" "Already up to date, current version : ${current_version}"
-  else
-    _zsh_direnv_log $NONE "blue" "-> Updating direnv..."
-    _zsh_direnv_download_install ${last_version}
-    _zsh_direnv_log $BOLD "green" "Update OK"
+  if ! chmod +x "$ZSH_DIRENV_BIN_PATH"; then
+    _zsh_direnv_log "Failed to set executable bit: ${ZSH_DIRENV_BIN_PATH}"
+    _zsh_direnv_log "#############################################"
+    return 1
   fi
-  _zsh_direnv_log $NONE "blue" "#############################################"
+
+  _zsh_direnv_log "Install OK"
+  _zsh_direnv_log "#############################################"
 }
 
 _zsh_direnv_load() {
-    # export PATH if needed
-    local -r plugin_dir=${DIRENV_HOME}
-    # Add the plugin bin directory path if it doesn't exist in $PATH.
-    if [[ -z ${path[(r)$plugin_dir]} ]]; then
-        path+=($plugin_dir)
-    fi
+  # export PATH if needed
+  if [[ -z ${path[(r)$ZSH_DIRENV_BIN_DIR]} ]]; then
+    path+=($ZSH_DIRENV_BIN_DIR)
+  fi
     eval "$(direnv hook zsh)"
 }
 
-# install direnv if it isnt already installed
-[[ ! -f "${ZSH_DIRENV_VERSION_FILE}" ]] && _zsh_direnv_install
+# install direnv if it isn't already installed
+_zsh_direnv_install_if_missing
 
 # load direnv if it is installed
-if [[ -f "${ZSH_DIRENV_VERSION_FILE}" ]]; then
-    _zsh_direnv_load
+if command -v direnv >/dev/null 2>&1 || [[ -x "$ZSH_DIRENV_BIN_PATH" ]]; then
+  _zsh_direnv_load
 fi
 
-unset -f _zsh_direnv_install _zsh_direnv_load
+unset -f _zsh_direnv_install_if_missing _zsh_direnv_load _zsh_direnv_last_version
